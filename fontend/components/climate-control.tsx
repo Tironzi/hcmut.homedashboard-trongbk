@@ -37,6 +37,11 @@ export function ClimateControl({ language }: ClimateControlProps) {
 
   // ----- SOCKET.IO RECEIVE -----
   useEffect(() => {
+    // Yêu cầu server gửi lại dữ liệu lần nữa mỗi khi tab được mở
+    socket.emit("request_sync_state")
+  }, [])
+  
+  useEffect(() => {
     socket.on("climate_update", (data) => {
       console.log("📥 climate_update:", data)
 

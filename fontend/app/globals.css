@@ -123,3 +123,10 @@
     @apply bg-background text-foreground;
   }
 }
+html {
+  scroll-behavior: smooth;
+}
+
+section {
+  scroll-margin-top: 100px; /* Tránh bị Header che mất nội dung */
+}

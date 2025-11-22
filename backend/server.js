@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const https = require('https'); // Hỗ trợ HTTPS để kết nối Ngrok
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -28,14 +29,16 @@ const MQTT_OPTIONS = {
 };
 
 
+
+
 // ========================== INIT APP ==========================
 const app = express();
 const server = http.createServer(app);
 
 // --- CẤU HÌNH DANH SÁCH CHO PHÉP TRUY CẬP (CORS) ---
 const allowedOrigins = [
-  process.env.ORIGIN_FRONTEND,             // 1. Link Online (lấy từ file .env)
-  "http://localhost:3000"                // 3. Link Localhost (để bạn code ở nhà)
+  process.env.ORIGIN_FRONTEND,
+  "http://localhost:3000"
 ];
 
 // SOCKET.IO
@@ -92,13 +95,11 @@ app.post('/api/auth/login', async (req, res) => {
 
 // MQTT connect
 const mqttClient = mqtt.connect(MQTT_URL, MQTT_OPTIONS);
+
 // ---- Update climate ----
-
-
 let lastState = {
   devices: {}
 };
-
 
 mqttClient.on("connect", () => {
   console.log("🌐 MQTT Connected (HiveMQ Cloud)");
@@ -112,8 +113,8 @@ mqttClient.on("connect", () => {
     else console.error("❌ Subscribe error:", err);
   });
 });
-// ================= MQTT ==================
 
+// ================= MQTT ==================
 mqttClient.on("message", async (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
@@ -154,10 +155,8 @@ mqttClient.on("message", async (topic, message) => {
 });
 
 
-
 // =============================================================
-// 🔥 OPTIONAL API — FRONTEND GỬI LỆNH ĐIỀU KHIỂN → MQTT 
-// (hiện tại không xài restAPI nhưng để xem cách hoạt động của restAPI)
+// 🔥 OPTIONAL API — FRONTEND GỬI LỆNH ĐIỀU KHIỂN → MQTT
 // =============================================================
 app.post('/api/device/control', (req, res) => {
   const { device, state } = req.body;
@@ -178,24 +177,19 @@ app.post('/api/device/control', (req, res) => {
 io.on("connection", async (socket) => {
   console.log("🟢 Client Connected:", socket.id);
 
-// ====================================================
-  // HÀM GỬI DỮ LIỆU (Tách ra để tái sử dụng)
-  // ====================================================
   const sendCurrentState = async () => {
-    // 1. Gửi Climate
     socket.emit("climate_update", {
       temperature: lastState.temp || 0,
       humidity: lastState.humi || 0,
       air: lastState.air || "Good",
     });
 
-    // 2. Gửi Devices từ DB
     try {
       const devicesFromDb = await Device.find({});
       const deviceMap = {};
       devicesFromDb.forEach(d => {
         deviceMap[d.deviceId] = d.state;
-        lastState.devices[d.deviceId] = d.state; 
+        lastState.devices[d.deviceId] = d.state;
       });
       console.log("📤 Sync state cho client:", socket.id);
       socket.emit("device_all_update", deviceMap);
@@ -204,39 +198,108 @@ io.on("connection", async (socket) => {
     }
   };
 
-  // Gửi ngay khi vừa connect (giữ nguyên logic cũ của bạn)
+  // Gửi ngay khi vừa connect
   sendCurrentState();
 
-  // 🔥 THÊM MỚI: Lắng nghe yêu cầu đồng bộ từ Frontend
   socket.on("request_sync_state", () => {
     console.log("🔄 Client yêu cầu đồng bộ lại state:", socket.id);
     sendCurrentState();
   });
-  // ============================================
-  // 🔥 NHẬN LỆNH TỪ FRONTEND → MQTT + DB + realtime
-  // ============================================
+
   socket.on("device_control", async (data) => {
     console.log("📥 Web gửi điều khiển:", data);
 
-    // 1) Publish xuống ESP32
     mqttClient.publish("smarthome/control", JSON.stringify(data));
 
-    // 2) Update cache ngay
     lastState.devices[data.device] = data.state;
 
-    // 3) Lưu vào DB
     await Device.findOneAndUpdate(
       { deviceId: data.device },
       { state: data.state, updatedAt: Date.now() },
       { upsert: true }
     );
 
-    // 4) Phát realtime cho TẤT CẢ web
     io.emit("device_update", data);
   });
 });
 
+const CAM_URL = "http://172.20.10.4/stream";
 
+let clients = new Set();
+let lastChunk = null;  // quan trọng!
+
+const BOUNDARY = "123456789000000000000987654321";
+
+function connectCamera() {
+  console.log("🔌 Connecting to ESP32-CAM...");
+
+  const req = http.get(CAM_URL, (camRes) => {
+    console.log("📡 Connected to ESP32-CAM");
+
+    camRes.on("data", (chunk) => {
+      // Lưu chunk cuối để tab mới nhận được ngay
+      lastChunk = chunk;
+
+      // Forward cho tất cả viewer
+      clients.forEach((res) => {
+        if (!res.writableEnded) {
+          res.write(chunk);
+        }
+      });
+    });
+
+    camRes.on("end", () => {
+      console.log("⚠️ Camera ended, reconnecting...");
+      setTimeout(connectCamera, 1000);
+    });
+  });
+
+  req.on("error", () => {
+    console.log("❌ Camera connection error, retrying...");
+    setTimeout(connectCamera, 2000);
+  });
+}
+app.get("/cam", (req, res) => {
+  console.log("🟢 New viewer connected");
+
+  res.writeHead(200, {
+    "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`,
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Pragma": "no-cache"
+  });
+
+  if (lastChunk) {
+    res.write(lastChunk);
+  }
+
+  clients.add(res);
+
+  req.on("close", () => {
+    console.log("🔴 Viewer closed (pause/tab closed)");
+    res.end();
+    clients.delete(res);
+  });
+
+  res.on("error", () => {
+    console.log("⚠️ Viewer connection error");
+    res.end();
+    clients.delete(res);
+  });
+});
+
+// Cleanup ghost clients
+setInterval(() => {
+  clients.forEach((res) => {
+    if (res.writableEnded || res.destroyed) {
+      console.log("🧹 Cleaning dead client...");
+      clients.delete(res);
+    }
+  });
+}, 3000);
+
+// Start camera connection
+connectCamera();
 
 
 // =============================================================
