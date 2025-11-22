@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button"
 
 // ... (giữ nguyên interface và props)
 
-const STREAM_URL = "http://localhost:5000/cam";
+
+const STREAM_URL =
+  process.env.NODE_ENV === "production"
+    ? process.env.NEXT_PUBLIC_CAMERA_URL      // Localtonet (Vercel)
+    : "http://localhost:5000/cam";           // Backend local
+
 
 export function CameraFeed({ language }: CameraFeedProps) {
   const [isPlaying, setIsPlaying] = useState(true)
