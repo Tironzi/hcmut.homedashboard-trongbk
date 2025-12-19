@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { Geist } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
+import AlarmListener from "@/components/AlarmListener";
 
 const geist = Geist({ 
   subsets: ["latin"],
@@ -30,6 +31,7 @@ export default function RootLayout({
         className={`${geist.variable} font-sans antialiased`}
         suppressHydrationWarning={true} 
       > 
+        <AlarmListener />
         {children}
         <Analytics />
       </body>

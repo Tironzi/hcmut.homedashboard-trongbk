@@ -1,7 +1,7 @@
 "use client"
 
 import { Zap, Sliders, Wind, Droplets, Shield, Camera, LogOut, Home } from "lucide-react"
-import { Language } from "@/app/page"
+import { Language } from "@/app/page" // Đảm bảo đường dẫn này đúng với project của bạn
 
 interface SidebarNavProps {
   onLogout: () => void
@@ -10,7 +10,6 @@ interface SidebarNavProps {
   language: Language
 }
 
-// 🔹 Từ điển ngôn ngữ
 const translations = {
   vi: {
     quickActions: "Tác vụ nhanh",
@@ -45,12 +44,22 @@ export function SidebarNav({ onLogout, activeSection, onSectionChange, language 
   ]
 
   return (
-    <aside className="fixed left-4 top-4 h-[calc(100vh-2rem)] w-56 bg-gradient-to-b from-purple-600 to-purple-800 text-white flex flex-col rounded-3xl shadow-xl py-8">
+    <aside 
+      className={`
+        flex flex-col bg-gradient-to-b from-purple-600 to-purple-800 text-white transition-all duration-300
+        
+        /* 🔹 Mobile Styles (Mặc định) */
+        relative w-full h-full rounded-2xl py-6 shadow-none
+
+        /* 🔹 Desktop Styles (Màn hình > 768px) */
+        md:fixed md:left-4 md:top-4 md:h-[calc(100vh-2rem)] md:w-56 md:rounded-3xl md:shadow-xl md:py-8
+      `}
+    >
       
       {/* Logo Home */}
-      <div className="flex justify-center mb-8">
-        <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-lg">
-          <Home className="w-7 h-7 text-purple-600" />
+      <div className="flex justify-center mb-6 md:mb-8">
+        <div className="w-12 h-12 md:w-14 md:h-14 bg-white rounded-full flex items-center justify-center shadow-lg">
+          <Home className="w-6 h-6 md:w-7 md:h-7 text-purple-600" />
         </div>
       </div>
 
@@ -77,7 +86,7 @@ export function SidebarNav({ onLogout, activeSection, onSectionChange, language 
       </nav>
 
       {/* Logout */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pt-4 md:pt-0 md:pb-4">
         <button
           onClick={onLogout}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-purple-100 hover:bg-purple-500/40 transition-all duration-200"

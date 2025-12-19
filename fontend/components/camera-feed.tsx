@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button"
 
 // ... (giữ nguyên interface và props)
 
-const STREAM_URL = "http://localhost:5000/cam";
+
+const STREAM_URL =
+  process.env.NODE_ENV === "production"
+    ? process.env.NEXT_PUBLIC_CAMERA_URL      // Localtonet (Vercel)
+    : "http://localhost:5000/cam";           // Backend local
+
 
 export function CameraFeed({ language }: CameraFeedProps) {
   const [isPlaying, setIsPlaying] = useState(true)
@@ -17,14 +22,18 @@ export function CameraFeed({ language }: CameraFeedProps) {
   // Ref để can thiệp trực tiếp vào thẻ img
   const imgRef = useRef<HTMLImageElement>(null)
 
-  // 🧹 HÀM DỌN DẸP QUAN TRỌNG
-  const cleanupStream = () => {
-    if (imgRef.current) {
-      // Gán src rỗng để trình duyệt ngắt ngay kết nối socket cũ
-      imgRef.current.src = "";
-      imgRef.current.removeAttribute("src");
-    }
-  };
+ // 🧹 Sửa lại hàm dọn dẹp trong CameraFeed.tsx
+ const cleanupStream = () => {
+  if (imgRef.current) {
+    // Bước 1: Gán src = "" để ngắt stream hình ảnh
+    imgRef.current.src = ""; 
+    imgRef.current.removeAttribute("src");
+
+    // Bước 2: (Mẹo) Gán một src rác nhẹ để trình duyệt "quên" hẳn kết nối cũ
+    // Điều này giúp giải phóng socket khỏi pool của Chrome nhanh hơn
+    imgRef.current.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; 
+  }
+};
 
   const handlePlayPause = () => {
     if (isPlaying) {

@@ -1,59 +1,116 @@
 "use client"
 
-import { Power, AlertTriangle } from "lucide-react"
+import { AlertTriangle, Flame } from "lucide-react"
 import { Card } from "@/components/ui/card"
-import { useState } from "react"
-// 🔹 1. Import kiểu Language (từ file page.tsx)
+import { useState, useEffect } from "react"
 import { Language } from "@/app/page";
+import { socket } from "@/lib/socket";
 
-// 🔹 2. Thêm đối tượng dịch thuật
 const translations = {
   vi: {
     title: "Tác vụ nhanh",
-    allLights: "Tất cả đèn",
-    allAlarm: "Tất cả báo động",
+    Alarm: "Báo động",
+    firePump: "Bơm chữa cháy",
   },
   en: {
     title: "Quick Actions",
-    allLights: "All Lights",
-    allAlarm: "All Alarm",
+    Alarm: "Alarm",
+    firePump: "Fire Pump",
   }
 }
 
-// 🔹 3. Định nghĩa interface để NHẬN prop 'language'
 interface QuickActionsProps {
   language: Language;
 }
 
-// 🔹 4. Nhận prop { language }
+const MQTT_DEVICE_MAP: Record<string, string> = {
+  "all-alarm": "bao_dong",
+  "fire-pump": "bom",
+};
+const MQTT_DEVICE_MAP_REVERSE: Record<string, string> = {
+  "bao_dong": "all-alarm",
+  "bom": "fire-pump",
+};
+
 export function QuickActions({ language }: QuickActionsProps) {
   const [activeActions, setActiveActions] = useState<Set<string>>(new Set())
-  // 🔹 5. Chọn bộ dịch dựa trên prop
   const t = translations[language];
 
-  // 🔹 6. Cập nhật mảng actions để dùng text từ 't'
-  const actions = [
-    { id: "all-lights", icon: Power, label: t.allLights, color: "bg-accent" },
-    { id: "all-alarm", icon: AlertTriangle, label: t.allAlarm, color: "bg-red-500" },
-  ]
+  // Cập nhật trạng thái từ backend:
+  useEffect(() => {
+    // Khi server trả về trạng thái thiết bị
+    const onDeviceUpdate = (data: { device: string, state: "ON" | "OFF" }) => {
+      const quickActionId = MQTT_DEVICE_MAP_REVERSE[data.device];
+      if (!quickActionId) return;
+      setActiveActions(prev => {
+        const next = new Set(prev);
+        if (data.state === "ON") {
+          next.add(quickActionId);
+        } else {
+          next.delete(quickActionId);
+        }
+        return next;
+      });
+    };
 
-  const toggleAction = (id: string) => {
+    socket.on("device_update", onDeviceUpdate);
+
+    // Đồng bộ lại trạng thái toàn bộ nếu server trả về tất cả
+    const onAllUpdate = (data: Record<string, string>) => {
+      setActiveActions(() => {
+        const next = new Set<string>();
+        for (const [device, state] of Object.entries(data)) {
+          const quickActionId = MQTT_DEVICE_MAP_REVERSE[device];
+          if (quickActionId && state === "ON") {
+            next.add(quickActionId);
+          }
+        }
+        return next;
+      });
+    };
+
+    socket.on("device_all_update", onAllUpdate);
+
+    // Yêu cầu server sync trạng thái khi lên page
+    socket.emit("request_sync_state");
+
+    return () => {
+      socket.off("device_update", onDeviceUpdate);
+      socket.off("device_all_update", onAllUpdate);
+    };
+  }, []);
+
+  const actions = [
+    { id: "all-alarm", icon: AlertTriangle, label: t.Alarm, color: "bg-red-500" },
+    { id: "fire-pump", icon: Flame, label: t.firePump, color: "bg-orange-500" },
+  ];
+
+  const handleToggleAction = (id: string) => {
     setActiveActions((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) {
+      const isActive = next.has(id);
+      if (isActive) {
         next.delete(id)
       } else {
         next.add(id)
+      }
+
+      // Gửi trạng thái điều khiển lên backend
+      const mqttDevice = MQTT_DEVICE_MAP[id]
+      if (mqttDevice) {
+        socket.emit("device_control", {
+          device: mqttDevice,
+          state: isActive ? "OFF" : "ON"
+        });
       }
       return next
     })
   }
 
   return (
-    <Card className="p-6">
-      {/* 🔹 7. Sử dụng text đã dịch */}
-      <h2 className="text-lg font-semibold mb-4 text-foreground">{t.title}</h2>
-      <div className="grid grid-cols-2 gap-4">
+    <Card className="p-4 md:p-6">
+      <h2 className="text-base md:text-lg font-semibold mb-4 text-foreground">{t.title}</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
         {actions.map((action) => {
           const Icon = action.icon
           const isActive = activeActions.has(action.id)
@@ -61,19 +118,22 @@ export function QuickActions({ language }: QuickActionsProps) {
           return (
             <div
               key={action.id}
-              className="flex items-center justify-between p-4 border border-input rounded-lg hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between p-3 md:p-4 border border-input rounded-lg hover:bg-muted/50 transition-colors"
             >
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg ${action.color} flex items-center justify-center text-white`}>
-                  <Icon className="w-5 h-5" />
+              <div className="flex items-center gap-2 md:gap-3">
+                <div 
+                  className={`w-9 md:w-10 h-9 md:h-10 rounded-lg ${action.color} flex items-center justify-center text-white flex-shrink-0`}
+                >
+                  <Icon className="w-4 md:w-5 h-4 md:h-5" />
                 </div>
-                {/* 🔹 8. Đã dùng 'action.label' (lấy từ 't' ở bước 6) */}
-                <span className="text-sm font-medium text-foreground">{action.label}</span>
+                <span className="text-xs md:text-sm font-medium text-foreground truncate">
+                  {action.label}
+                </span>
               </div>
 
               <button
-                onClick={() => toggleAction(action.id)}
-                className={`w-12 h-7 rounded-full transition-colors flex items-center ${
+                onClick={() => handleToggleAction(action.id)}
+                className={`w-12 h-7 rounded-full transition-colors flex items-center flex-shrink-0 ${
                   isActive ? "bg-primary" : "bg-muted"
                 }`}
               >
