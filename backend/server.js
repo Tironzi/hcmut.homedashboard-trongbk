@@ -7,7 +7,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const mqtt = require('mqtt');
-const Energy = require('./models/energy'); 
+const Energy = require('./models/energy_data'); 
 const Notification = require('./models/Notification');
 const moment = require('moment');
 // ========================== MODEL ==========================
