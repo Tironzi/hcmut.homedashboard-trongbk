@@ -7,7 +7,9 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const mqtt = require('mqtt');
-
+const Energy = require('./models/energy'); 
+const Notification = require('./models/Notification');
+const moment = require('moment');
 // ========================== MODEL ==========================
 let User = require('./models/User');
 const Device = require("./models/Device");
@@ -15,13 +17,13 @@ if (User.default) User = User.default;
 
 // ========================== CONFIG ==========================
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI;
+const MONGO_URI = process.env. MONGO_URI;
 
 // --- MQTT HiveMQ Cloud ---
 const MQTT_URL = process.env.MQTT_URL;
 const MQTT_OPTIONS = {
   username: process.env.MQTT_USERNAME,
-  password: process.env.MQTT_PASSWORD,
+  password: process. env.MQTT_PASSWORD,
   reconnectPeriod: process.env.MQTT_RECONNECT_PERIOD || 2000,
 };
 
@@ -45,15 +47,15 @@ const io = new Server(server, {
 
 // ==== SECURITY STATE TOÀN CỤC ====
 const currentSecurityState = {
-  call: true,
-  sms: true,
-  motion: true,
+  call: false,
+  sms: false,
+  motion: false,
   motionStatus: false,
-  fire: true,
-  fireStatus: false,
-  door: true,
+  fire: false,
+  fireStatus:  false,
+  door: false,
   doorStatus: false,
-  auto: true
+  auto: false
 };
 
 // MIDDLEWARE (Express)
@@ -72,7 +74,7 @@ mongoose.connect(MONGO_URI)
 // ========================== AUTH API ==========================
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req. body;
     const user = await User.findOne({ username });
     if (!user) return res.status(401).json({ message: 'Sai tài khoản hoặc mật khẩu' });
 
@@ -101,35 +103,57 @@ const mqttClient = mqtt.connect(MQTT_URL, MQTT_OPTIONS);
 let lastState = { devices: {} };
 let lastSimStatus = { at: 0, reg: 0, csq: 0 };
 let lastMq2Status = { status: "CLEAR" };
+let lastPeopleStatus = { status: "CLEAR" };
+let lastMotionStatus = { status: "CLEAR" };
+let lastPzemData = { voltage: 0, current: 0, power: 0, energy: 0 };
+let lastDoorStatus = { status: "CLEAR" };
 
-mqttClient.subscribe("smarthome/report", (err) => {
-  if (!err) console.log("📡 Subscribed → smarthome/report");
-  else console.error("❌ Subscribe error: smarthome/report", err);
-});
-mqttClient.subscribe("smarthome/dht11", (err) => {
-  if (!err) console.log("📡 Subscribed → smarthome/dht11");
-  else console.error("❌ Subscribe error: smarthome/dht11", err);
-});
-mqttClient.subscribe("smarthome/sim_status", (err) => {
-  if (!err) console.log("📡 Subscribed → smarthome/sim_status");
-  else console.error("❌ Subscribe error: smarthome/sim_status", err);
-});
-mqttClient.subscribe("smarthome/mq2", (err) => {
-  if (!err) console.log("📡 Subscribed → smarthome/mq2");
-  else console.error("❌ Subscribe error: smarthome/mq2", err);
-});
-mqttClient.subscribe("smarthome/motion", (err) => {
-  if (!err) console.log("📡 Subscribed → smarthome/motion");
-  else console.error("❌ Subscribe error: smarthome/motion", err);
+
+let lastPzemUpdateTime = null;
+
+mqttClient.on("connect", () => {
+  console.log("🌐 MQTT Connected (HiveMQ Cloud)");
+
+  mqttClient.subscribe("smarthome/report", (err) => {
+    if (! err) console.log("📡 Subscribed → smarthome/report");
+    else console.error("❌ Subscribe error:  smarthome/report", err);
+  });
+  mqttClient.subscribe("smarthome/dht11", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/dht11");
+    else console.error("❌ Subscribe error: smarthome/dht11", err);
+  });
+  mqttClient.subscribe("smarthome/sim_status", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/sim_status");
+    else console.error("❌ Subscribe error: smarthome/sim_status", err);
+  });
+  mqttClient.subscribe("smarthome/mq2", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/mq2");
+    else console.error("❌ Subscribe error: smarthome/mq2", err);
+  });
+  mqttClient.subscribe("smarthome/motion", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/motion");
+    else console.error("❌ Subscribe error: smarthome/motion", err);
+  });
+  mqttClient.subscribe("smarthome/people", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/people");
+    else console.error("❌ Subscribe error: smarthome/people", err);
+  });
+  mqttClient.subscribe("smarthome/pzem", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/pzem");
+    else console.error("❌ Subscribe error: smarthome/pzem", err);
+  });
+  mqttClient.subscribe("smarthome/door", (err) => {
+    if (!err) console.log("📡 Subscribed → smarthome/door");
+    else console.error("❌ Subscribe error: smarthome/door", err);
+  });
 });
 
-// ================= MQTT ==================
+// ================= MQTT MESSAGE HANDLER ==================
 mqttClient.on("message", async (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
-    console.log("📥 MQTT:", data);
+    console.log("📥 MQTT:", topic, data);
 
-    // ====== CLIMATE ======
     if (data.temp !== undefined || data.humi !== undefined || data.air !== undefined) {
       lastState.temp = data.temp;
       lastState.humi = data.humi;
@@ -141,7 +165,6 @@ mqttClient.on("message", async (topic, message) => {
       });
     }
 
-    // ====== DEVICE ======
     if (data.device && data.state !== undefined) {
       const deviceId = data.device;
       const state = data.state;
@@ -155,7 +178,6 @@ mqttClient.on("message", async (topic, message) => {
       io.emit("device_update", { device: deviceId, state });
     }
 
-    // ===== SIM STATUS =====
     if (topic === "smarthome/sim_status") {
       if (data.at === 0) {
         data.reg = 0;
@@ -165,78 +187,196 @@ mqttClient.on("message", async (topic, message) => {
       io.emit("sim_status", data);
     }
 
-    // ===== MQ2 - GAS/SMOKE ALARM =====
+    // --- XỬ LÝ BÁO CHÁY (MQ2) ---
     if (topic === "smarthome/mq2") {
+      // Chỉ lưu khi trạng thái chuyển từ CLEAR -> ALARM (hoặc lần đầu tiên)
+      if (data.status === "ALARM" && lastMq2Status.status !== "ALARM") {
+         await Notification.create({
+            type: 'fire',
+            message: 'Phát hiện khói/khí gas!'
+         });
+         console.log("🔥 Đã lưu cảnh báo cháy vào DB");
+      }
+
       io.emit("mq2", data);
       lastMq2Status = data;
-      // sync fireStatus if desired
       currentSecurityState.fireStatus = (data.status === "ALARM");
     }
+
+    // --- XỬ LÝ CHUYỂN ĐỘNG (MOTION) ---
     if (topic === "smarthome/motion") {
-      const data = JSON.parse(message.toString());
+      // Chỉ lưu khi phát hiện chuyển động mới
+      if (data.status === "DETECTED" && lastMotionStatus.status !== "DETECTED") {
+         await Notification.create({
+            type: 'motion',
+            message: 'Phát hiện có người đột nhập!'
+         });
+         console.log("⚠️ Đã lưu cảnh báo chuyển động vào DB");
+      }
+
       io.emit("motion", data);
+      lastMotionStatus = data;
       currentSecurityState.motionStatus = (data.status === "DETECTED");
     }
 
-    // Sync other security state if your firmware sends them...
-    // Example: custom topic or custom JSON content (TODO: user edit)
+    if (topic === "smarthome/people") {
+      lastPeopleStatus = data;
+      io.emit("people", data);
+      console.log("👤 People status:", data. status);
+    }
+
+    if (topic === "smarthome/pzem") {
+      const currentTime = Date.now();
+      
+      if (lastPzemUpdateTime !== null) {
+        const timeDiffMs = currentTime - lastPzemUpdateTime;
+        const timeDiffHours = timeDiffMs / (1000 * 3600);
+        const powerW = data.power || 0;
+        const deltaWh = powerW * timeDiffHours; 
+
+        // --- CODE XỬ LÝ DATABASE MỚI (FIX CỨNG) ---
+        const todayStr = moment().format("YYYY-MM-DD");
+        const currentHour = new Date().getHours(); 
+
+        try {
+          // 1. Tìm bản ghi hôm nay
+          let energyRecord = await Energy.findOne({ date: todayStr });
+          
+          // 2. Nếu chưa có thì TẠO MỚI VỚI MẢNG CỐ ĐỊNH
+          if (!energyRecord) {
+            console.log(`✨ Đang tạo mới ngày ${todayStr} với mảng Array chuẩn...`);
+            energyRecord = await Energy.create({ 
+                date: todayStr,
+                totalWh: 0,
+                // 👇 ÉP BUỘC TẠO MẢNG 24 SỐ 0 NGAY LẬP TỨC
+                hourly: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] 
+            });
+          }
+
+          // 3. Cập nhật dữ liệu
+          await Energy.updateOne(
+            { date: todayStr },
+            { 
+              $inc: { 
+                totalWh: deltaWh,               
+                [`hourly.${currentHour}`]: deltaWh 
+              } 
+            }
+          );
+        } catch (dbErr) {
+          console.error("Lỗi lưu DB Energy:", dbErr);
+        }
+        // -------------------------------------------
+      }
+
+      lastPzemUpdateTime = currentTime;
+      lastPzemData = data;
+      
+      fetchAndEmitEnergyData(); 
+    }
+
+    // --- XỬ LÝ CỬA (DOOR) ---
+    if (topic === "smarthome/door") {
+      console.log("📥 [MQTT] Door data received:", data);
+
+      // 👇 THÊM ĐOẠN NÀY: Lưu vào DB nếu có báo động mới
+      if (data.status === "ALARM" && lastDoorStatus.status !== "ALARM") {
+         try {
+           await Notification.create({
+              type: 'door',
+              message: 'Cảnh báo: Mở cửa sai quá 5 lần!'
+           });
+           console.log("🚪 Đã lưu cảnh báo cửa vào DB");
+         } catch (err) {
+           console.error("❌ Lỗi lưu thông báo cửa:", err);
+         }
+      }
+      // ------------------------------------------------
+
+      io.emit("door_breach", data);
+      console.log("🚪 [Backend] Emitted door_breach with:", data);
+
+      lastDoorStatus = data;
+      currentSecurityState.doorStatus = (data.status === "ALARM");
+    }
 
   } catch (err) {
     console.error("❌ MQTT JSON Error:", err);
   }
 });
 
+app.get("/", (req, res) => {
+  res.send("Hello!   Server is running fine.");
+});
+
 // =============================================================
 // 🔥 SOCKET.IO HANDLER
 // =============================================================
-io.on("connection", async (socket) => {
+io. on("connection", async (socket) => {
   console.log("🟢 Client Connected:", socket.id);
 
-  // GỬI ĐẦY ĐỦ TRẠNG THÁI NGAY KHI KẾT NỐI VÀ SAU KHI FE YÊU CẦU ĐỒNG BỘ
   const sendCurrentState = async () => {
+
+    // ==================== 1.  CLIMATE (Nhiệt độ, độ ẩm) ====================
     socket.emit("climate_update", {
       temperature: lastState.temp || 0,
       humidity: lastState.humi || 0,
       air: lastState.air || "Good",
     });
-    socket.emit("sim_status", lastSimStatus);
-    socket.emit("mq2", lastMq2Status);
 
-    socket.emit("call_sms_status", { call: currentSecurityState.call, sms: currentSecurityState.sms });
-    socket.emit("motion_enable", { enable: currentSecurityState.motion });
-    socket.emit("motion_intrude", { state: currentSecurityState.motionStatus ? 1 : 0 });
+    // ==================== 2. SENSORS (Cảm biến) ====================
+    socket.emit("sim_status", lastSimStatus);
+    socket.emit("people", lastPeopleStatus);
+
+
+    // ==================== 3. SECURITY (An ninh) ====================
+
+    // 3.1. Trạng thái cảm biến an ninh (Đồng nhất format)
+    socket.emit("mq2", lastMq2Status);
+    socket.emit("door", lastDoorStatus);
+    socket.emit("motion", lastMotionStatus);
+
+    // Chỉ gửi door_breach khi CÓ cảnh báo
+    if (currentSecurityState.doorStatus) {
+      socket.emit("door_breach", lastDoorStatus);
+    }
+
+    // 3.2. Trạng thái bật/tắt các tính năng an ninh
+    socket.emit("call_sms_status", {
+      call: currentSecurityState.call,
+      sms: currentSecurityState.sms
+    });
     socket.emit("fire_enable", { enable: currentSecurityState.fire });
-    socket.emit("mq2", { status: currentSecurityState.fireStatus ? "ALARM" : "CLEAR" });
+    socket.emit("motion_enable", { enable: currentSecurityState.motion });
     socket.emit("door_enable", { enable: currentSecurityState.door });
-    socket.emit("door_breach", { state: currentSecurityState.doorStatus ? 1 : 0 });
-    socket.emit("security_mode", { mode: currentSecurityState.auto ? "auto" : "manual" });
- socket.emit("motion", {
-    status: currentSecurityState.motionStatus ? "DETECTED" : "CLEAR"
-  });
+
+    // 3.4. Chế độ Auto/Manual
+    socket.emit("security_mode", {
+      mode: currentSecurityState.auto ? "auto" : "manual"
+    });
+
+    // ==================== 4. DEVICES (Relay/Thiết bị) ====================
     try {
       const devicesFromDb = await Device.find({});
       const deviceMap = {};
       devicesFromDb.forEach(d => {
-        deviceMap[d.deviceId] = d.state;
+        deviceMap[d. deviceId] = d. state;
         lastState.devices[d.deviceId] = d.state;
       });
       socket.emit("device_all_update", deviceMap);
     } catch (err) {
       console.error("Lỗi lấy DB:", err);
     }
+    fetchAndEmitEnergyData();
   };
 
-  // Gửi ngay khi client vừa connect
   sendCurrentState();
 
-  // FE gọi sync → server gửi lại mọi trạng thái
   socket.on("request_sync_state", () => {
     sendCurrentState();
   });
 
-  // FE điều khiển security control (lưu lại trạng thái)
   socket.on("security_control", (cmd) => {
-    // Parse: Hỗ trợ cả dạng "KEY:VALUE" và object
     let k, v;
     if (typeof cmd === 'string') {
       [k, v] = cmd.split(":");
@@ -246,19 +386,24 @@ io.on("connection", async (socket) => {
     }
     v = Number(v);
 
-    // Ánh xạ update trạng thái
     switch (k) {
-      case "CALL": currentSecurityState.call = !!v; break;
-      case "SMS":  currentSecurityState.sms = !!v; break;
-      case "FIR":  currentSecurityState.motion = !!v; break; // Đảm bảo mapping giống FE
+      case "CALL":  currentSecurityState.call = !!v; break;
+      case "SMS": currentSecurityState. sms = !!v; break;
+      case "FIR": currentSecurityState. motion = !!v; break;
       case "DOOR": currentSecurityState.door = !!v; break;
       case "FIRE": currentSecurityState.fire = !!v; break;
       case "AUTO": currentSecurityState.auto = !!v; break;
-      // add more if needed
+      case "AUTOR": currentSecurityState.auto = !!v; break;
     }
 
-    // Publish xuống MQTT
-    let toSend = typeof cmd === 'string' ? cmd : JSON.stringify(cmd);
+    // 🆕 GỬI LẠI TRẠNG THÁI AUTO CHO TẤT CẢ CLIENT
+    if (k === "AUTO" || k === "AUTOR") {
+      io.emit("security_mode", {
+        mode: currentSecurityState.auto ? "auto" : "manual"
+      });
+    }
+
+    let toSend = typeof cmd === 'string' ? cmd :  JSON.stringify(cmd);
     mqttClient.publish("smarthome/control", toSend, () => {
       console.log("📤 MQTT Published:", toSend);
     });
@@ -266,20 +411,22 @@ io.on("connection", async (socket) => {
 
   socket.on("device_control", async (data) => {
     mqttClient.publish("smarthome/control", JSON.stringify(data));
-    lastState.devices[data.device] = data.state;
+    lastState. devices[data.device] = data.state;
     await Device.findOneAndUpdate(
-      { deviceId: data.device },
+      { deviceId: data. device },
       { state: data.state, updatedAt: Date.now() },
       { upsert: true }
     );
     io.emit("device_update", data);
   });
 });
+
+// =============================================================
+// 🎥 ESP32-CAM STREAMING
+// =============================================================
 const CAM_URL = "http://172.20.10.4/stream";
-
 let clients = new Set();
-let lastChunk = null;  // quan trọng!
-
+let lastChunk = null;
 const BOUNDARY = "123456789000000000000987654321";
 
 function connectCamera() {
@@ -289,38 +436,31 @@ function connectCamera() {
     console.log("📡 Connected to ESP32-CAM");
 
     camRes.on("data", (chunk) => {
-      lastChunk = chunk; // Lưu chunk để client mới có hình ngay
+      lastChunk = chunk;
 
-      // 🛠️ SỬA LẠI ĐOẠN NÀY: Kiểm tra kỹ việc ghi dữ liệu
       for (const res of clients) {
-        // Nếu kết nối đã đóng hoặc bị hủy, xóa ngay khỏi list
-        if (res.writableEnded || res.destroyed || res.closed) {
+        if (res.writableEnded || res.destroyed || res. closed) {
           clients.delete(res);
           continue;
         }
 
         try {
-          // Gửi chunk, nếu có lỗi callback sẽ bắt được
-          const success = res.write(chunk, (err) => {
+          res.write(chunk, (err) => {
             if (err) {
-              // Lỗi ghi (client đã ngắt), destroy socket và xóa
-              console.log("⚠️ Write error, destroying client");
-              res.end(); 
+              console. log("⚠️ Write error, destroying client");
+              res.end();
               clients.delete(res);
             }
           });
-          
-          // Nếu buffer đầy hoặc write trả về false (backpressure), có thể cân nhắc drop client nếu cần
-          // Nhưng quan trọng là try/catch bên dưới
         } catch (error) {
-            console.log("❌ Catch write error");
-            clients.delete(res);
+          console.log("❌ Catch write error");
+          clients.delete(res);
         }
       }
     });
 
     camRes.on("end", () => {
-      console.log("⚠️ Camera ended, reconnecting...");
+      console.log("⚠️ Camera ended, reconnecting.. .");
       setTimeout(connectCamera, 1000);
     });
   });
@@ -330,83 +470,16 @@ function connectCamera() {
     setTimeout(connectCamera, 2000);
   });
 }
-// ... (các phần import giữ nguyên)
-
-function connectCamera() {
-  console.log("🔌 Connecting to ESP32-CAM...");
-
-  const req = http.get(CAM_URL, (camRes) => {
-    console.log("📡 Connected to ESP32-CAM");
-
-    camRes.on("data", (chunk) => {
-      lastChunk = chunk; // Lưu chunk để client mới có hình ngay
-
-      // 🛠️ SỬA LẠI ĐOẠN NÀY: Kiểm tra kỹ việc ghi dữ liệu
-      for (const res of clients) {
-        // Nếu kết nối đã đóng hoặc bị hủy, xóa ngay khỏi list
-        if (res.writableEnded || res.destroyed || res.closed) {
-          clients.delete(res);
-          continue;
-        }
-
-        try {
-          // Gửi chunk, nếu có lỗi callback sẽ bắt được
-          const success = res.write(chunk, (err) => {
-            if (err) {
-              // Lỗi ghi (client đã ngắt), destroy socket và xóa
-              console.log("⚠️ Write error, destroying client");
-              res.end(); 
-              clients.delete(res);
-            }
-          });
-          
-          // Nếu buffer đầy hoặc write trả về false (backpressure), có thể cân nhắc drop client nếu cần
-          // Nhưng quan trọng là try/catch bên dưới
-        } catch (error) {
-            console.log("❌ Catch write error");
-            clients.delete(res);
-        }
-      }
-    });
-
-    camRes.on("end", () => {
-      console.log("⚠️ Camera ended, reconnecting...");
-      setTimeout(connectCamera, 1000);
-    });
-  });
-
-  req.on("error", () => {
-    console.log("❌ Camera connection error, retrying...");
-    setTimeout(connectCamera, 2000);
-  });
-}
-
-// ... (Giữ nguyên route /cam)
-
-
-  // 🧹 Sửa lại hàm dọn dẹp trong CameraFeed.tsx
-  const cleanupStream = () => {
-    if (imgRef.current) {
-      // Bước 1: Gán src = "" để ngắt stream hình ảnh
-      imgRef.current.src = ""; 
-      imgRef.current.removeAttribute("src");
-
-      // Bước 2: (Mẹo) Gán một src rác nhẹ để trình duyệt "quên" hẳn kết nối cũ
-      // Điều này giúp giải phóng socket khỏi pool của Chrome nhanh hơn
-      imgRef.current.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; 
-    }
-  };
 
 app.get("/cam", (req, res) => {
-  // console.log("🟢 New viewer connected"); // Comment bớt log cho đỡ rác
-
   res.writeHead(200, {
     "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`,
-    "Cache-Control": "no-cache, no-store, must-revalidate", // Thêm no-store
-    "Pragma": "no-cache",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma":  "no-cache",
     "Expires": "0",
-    "Connection": "close" // Quan trọng: Báo trình duyệt không giữ alive
+    "Connection": "close"
   });
+
   if (lastChunk) {
     res.write(lastChunk);
   }
@@ -414,7 +487,7 @@ app.get("/cam", (req, res) => {
   clients.add(res);
 
   req.on("close", () => {
-    console.log("🔴 Viewer closed (pause/tab closed)");
+    console.log("🔴 Viewer closed");
     res.end();
     clients.delete(res);
   });
@@ -426,20 +499,91 @@ app.get("/cam", (req, res) => {
   });
 });
 
-// Cleanup ghost clients
 setInterval(() => {
   clients.forEach((res) => {
     if (res.writableEnded || res.destroyed) {
-      console.log("🧹 Cleaning dead client...");
+      console.log("🧹 Cleaning dead client.. .");
       clients.delete(res);
     }
   });
 }, 3000);
 
-// Start camera connection
 connectCamera();
 
+app.get("/api/health", (req, res) => {
+  const status = mongoose.connection.readyState;
+  let dbStatusStr = "disconnected";
+  if (status === 1) dbStatusStr = "connected";
+  else if (status === 2) dbStatusStr = "connecting";
+  else if (status === 3) dbStatusStr = "disconnecting";
 
+  res.json({
+    database: dbStatusStr,
+    timestamp: new Date().toISOString()
+  });
+});
+// API lấy lịch sử thông báo (Lấy 20 tin mới nhất)
+app.get("/api/notifications", async (req, res) => {
+  try {
+    const notifs = await Notification.find()
+      .sort({ timestamp: -1 }) // Mới nhất lên đầu
+      .limit(20);              // Giới hạn 20 tin
+    res.json(notifs);
+  } catch (err) {
+    res.status(500).json({ error: "Lỗi lấy thông báo" });
+  }
+});
+
+// Hàm tính toán và gửi dữ liệu tổng hợp cho Client
+async function fetchAndEmitEnergyData() {
+  try {
+    const todayStr = moment().format("YYYY-MM-DD");
+    
+    // 1. Lấy dữ liệu hôm nay
+    let todayRecord = await Energy.findOne({ date: todayStr });
+    
+    // Tạo dữ liệu an toàn
+    let safeTotalWh = 0;
+    let safeHourly = new Array(24).fill(0);
+
+    if (todayRecord) {
+        safeTotalWh = todayRecord.totalWh || 0;
+        if (Array.isArray(todayRecord.hourly) && todayRecord.hourly.length > 0) {
+            safeHourly = todayRecord.hourly;
+        }
+    }
+
+    // 2. Tính tổng tháng
+    const startOfMonth = moment().startOf('month').format("YYYY-MM-DD");
+    const monthRecords = await Energy.find({ date: { $gte: startOfMonth } });
+    const monthTotalWh = monthRecords.reduce((sum, rec) => sum + (rec.totalWh || 0), 0);
+
+    // 3. Xử lý dữ liệu biểu đồ: Gửi đủ 24 giờ (0h - 23h)
+    // KHÔNG gộp 2 tiếng nữa để nhìn rõ từng khung giờ
+    const chartData = [];
+    for (let i = 0; i < 24; i++) { // Chạy từ 0 đến 23
+      const val = safeHourly[i] || 0;
+      const timeLabel = `${i}h`; // Nhãn đơn giản: 0h, 1h, ... 23h
+      chartData.push({
+        time: timeLabel,
+        energy: parseFloat(val.toFixed(2)) // Làm tròn 2 số lẻ
+      });
+    }
+
+    // Gửi xuống Client
+    io.emit("energy_dashboard_update", {
+      voltage: lastPzemData.voltage || 0,
+      current: lastPzemData.current || 0,
+      power: lastPzemData.power || 0,
+      energyTodayWh: safeTotalWh,
+      energyMonthWh: monthTotalWh,
+      chartData: chartData
+    });
+
+  } catch (e) {
+    console.error("Lỗi tính toán Energy:", e);
+  }
+}
 // =============================================================
 // 🚀 START SERVER
 // =============================================================

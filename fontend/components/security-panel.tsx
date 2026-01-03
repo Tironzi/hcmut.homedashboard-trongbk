@@ -30,11 +30,11 @@ const translations = {
     reg_fail: "Chưa đăng ký",
     fireName: "Báo cháy",
     fireActive: "Đang hoạt động",
-    gasAlarm: "Phát hiện khói/khí gas!",
+    gasAlarm: "Phát hiện khói/khí gas! ",
     gasClear: "Bình thường",
     motionName: "Chống trộm",
-    motionIntrude: "Cảnh báo có người đột nhập!",
-    motionClear: "Không phát hiện chuyển động",
+    motionIntrude: "Cảnh báo có người đột nhập! ",
+    motionClear:  "Không phát hiện chuyển động",
     doorName: "Cửa trước",
     doorLocked: "Bình thường",
     doorBreach: "Cảnh báo nhập sai mật khẩu 5 lần!",
@@ -51,7 +51,7 @@ const translations = {
     at: "AT Connect",
     reg: "Network Reg.",
     csq: "Signal Quality",
-    sim_ok: "Connected",
+    sim_ok:  "Connected",
     sim_nok: "Not connected",
     sim_none: "No network",
     sim_home: "Home",
@@ -65,19 +65,19 @@ const translations = {
     reg_fail: "Not registered",
     fireName: "Fire Alarm",
     fireActive: "Active",
-    gasAlarm: "Smoke/Gas detected!",
-    gasClear: "Normal",
+    gasAlarm:  "Smoke/Gas detected!",
+    gasClear:  "Normal",
     motionName: "Anti-theft",
-    motionIntrude: "Intrusion detected!",
+    motionIntrude:  "Intrusion detected!",
     motionClear: "No motion",
     doorName: "Front door",
-    doorLocked: "Normal",
+    doorLocked:  "Normal",
     doorBreach: "Password failed >5 times!",
     callBtn: "Call",
     smsBtn: "SMS",
     auto: "Auto",
     manual: "Manual",
-    on: "ON",
+    on:  "ON",
     off: "OFF",
   }
 };
@@ -86,7 +86,7 @@ interface SecurityPanelProps {
   language: Language;
 }
 
-// Helper functions (Giữ nguyên)
+// Helper functions
 function getSignalLevel(csq: number) {
   if (csq <= 14 && csq >= 0) return "bg-red-500";
   if (csq >= 15 && csq <= 20) return "bg-yellow-500";
@@ -100,123 +100,120 @@ function getSignalDesc(csq: number, t: any) {
   return "-";
 }
 function getRegDesc(reg: number, t: any) {
-  return reg === 1 ? t.reg_ok : t.reg_fail;
+  return reg === 1 ? t.reg_ok :  t.reg_fail;
 }
 
 export function SecurityPanel({ language }: SecurityPanelProps) {
   const t = translations[language];
 
-  // --- SIM STATE ---
+  // --- STATE ---
   const [simAt, setSimAt] = useState<number>(0);
   const [simReg, setSimReg] = useState<number>(0);
   const [simCSQ, setSimCSQ] = useState<number>(-1);
-
-  // --- CALL / SMS ---
   const [callEnable, setCallEnable] = useState(false);
   const [smsEnable, setSmsEnable] = useState(false);
-
-  // --- Chống trộm ---
   const [motionEnable, setMotionEnable] = useState(false);
   const [motionStatus, setMotionStatus] = useState(false);
-
-  // --- Cửa trước ---
   const [doorEnable, setDoorEnable] = useState(false);
   const [doorAlert, setDoorAlert] = useState(false);
-
-  // --- Báo cháy ---
   const [fireEnable, setFireEnable] = useState(false);
   const [fireAlert, setFireAlert] = useState(false);
-
-  // --- AUTO/MANUAL MODE ---
   const [autoMode, setAutoMode] = useState(true);
 
-  // --- Đồng bộ trạng thái với backend khi reload ---
+  // --- SOCKET LISTENERS ---
   useEffect(() => {
-    // 1. Định nghĩa handler
-    const handleSimStatus = (data: {at:number,reg:number,csq:number}) => {
+    const handleSimStatus = (data: {at: number,reg:number,csq:number}) => {
       setSimAt(data.at);
       setSimReg(data.reg);
       setSimCSQ(data.csq);
     };
 
-    const handleCallSmsStatus = (data: { call: boolean; sms: boolean }) => {
-      setCallEnable(!!data.call);
+    const handleCallSmsStatus = (data: { call:  boolean; sms: boolean }) => {
+      setCallEnable(!! data.call);
       setSmsEnable(!!data.sms);
     };
 
-    const handleMotionEnable = (data: {enable: boolean}) => setMotionEnable(!!data.enable);
+    const handleMotionEnable = (data: {enable:  boolean}) => setMotionEnable(!! data.enable);
     const handleMotionIntrude = (data: {state: number}) => setMotionStatus(data.state === 1);
+    
+    // 🆕 Handler realtime motion
+    const handleMotion = (data: {status: "DETECTED"|"CLEAR"}) => {
+      setMotionStatus(data.status === "DETECTED");
+    };
 
     const handleDoorEnable = (data: {enable: boolean}) => setDoorEnable(!!data.enable);
-    const handleDoorBreach = (data: {state: number}) => setDoorAlert(data.state === 1);
+    // ✅ RESET: Nhận object { status: "ALARM" }
+    const handleDoorBreach = (data: { status: string }) => {
+      console.log("🚪 Panel received:", data);
+      // Logic mới: So sánh status
+      const isAlarm = (data.status === "ALARM");
+      setDoorAlert(isAlarm);
+    };
 
-    const handleFireEnable = (data: {enable: boolean}) => setFireEnable(!!data.enable);
-
+    const handleFireEnable = (data: {enable: boolean}) => setFireEnable(!! data.enable);
     const handleMq2 = (data: {status: "ALARM" | "CLEAR"}) => {
-      setFireAlert(data.status === "ALARM");
+      setFireAlert(data. status === "ALARM");
     };
 
     const handleSecurityMode = (data: {mode: "auto"|"manual"}) => {
       setAutoMode(data.mode === "auto");
     };
 
-     // Handler realtime motion
-  const handleMotion = (data: {status: "DETECTED"|"CLEAR"}) => {
-    setMotionStatus(data.status === "DETECTED");
-  };
-
-    // 2. Lắng nghe
+    // Subscribe
     socket.on("sim_status", handleSimStatus);
     socket.on("call_sms_status", handleCallSmsStatus);
     socket.on("motion_enable", handleMotionEnable);
     socket.on("motion_intrude", handleMotionIntrude);
-    socket.on("motion", handleMotion);     
+    socket.on("motion", handleMotion);
     socket.on("door_enable", handleDoorEnable);
     socket.on("door_breach", handleDoorBreach);
     socket.on("fire_enable", handleFireEnable);
     socket.on("mq2", handleMq2);
     socket.on("security_mode", handleSecurityMode);
     
-    // 3. Gửi sync state khi mount lần đầu
     socket.emit("request_sync_state");
 
-    // 4. Cleanup
+    // Cleanup
     return () => {
       socket.off("sim_status", handleSimStatus);
       socket.off("call_sms_status", handleCallSmsStatus);
       socket.off("motion_enable", handleMotionEnable);
       socket.off("motion_intrude", handleMotionIntrude);
-      socket.off("motion", handleMotion); 
+      socket.off("motion", handleMotion);
       socket.off("door_enable", handleDoorEnable);
       socket.off("door_breach", handleDoorBreach);
       socket.off("fire_enable", handleFireEnable);
       socket.off("mq2", handleMq2);
       socket.off("security_mode", handleSecurityMode);
-         socket.off("motion", handleMotion); 
     };
   }, []);
 
-  // --- Lệnh điều khiển ---
-  const handleMotion = (isOn: boolean) => {
+  // --- CONTROL HANDLERS ---
+  const handleMotionControl = (isOn: boolean) => {  // 🆕 ĐỔI TÊN
     setMotionEnable(isOn);
     socket.emit("security_control", `FIR:${isOn ? 1 : 0}`);
   };
+  
   const handleDoor = (isOn: boolean) => {
     setDoorEnable(isOn);
-    socket.emit("security_control", `DOOR:${isOn ? 1 : 0}`);
+    socket.emit("security_control", `DOOR:${isOn ? 1 :  0}`);
   };
+  
   const handleFire = (isOn: boolean) => {
     setFireEnable(isOn);
-    socket.emit("security_control", `FIRE:${isOn ? 1 : 0}`);
+    socket.emit("security_control", `FIRE:${isOn ? 1 :  0}`);
   };
+  
   const handleCall = (isOn: boolean) => {
     setCallEnable(isOn);
     socket.emit("security_control", `CALL:${isOn ? 1 : 0}`);
   };
+  
   const handleSms = (isOn: boolean) => {
     setSmsEnable(isOn);
     socket.emit("security_control", `SMS:${isOn ? 1 : 0}`);
   };
+  
   const handleModeChange = (auto: boolean) => {
     setAutoMode(auto);
     socket.emit("security_control", `AUTO:${auto ? 1 : 0}`);
@@ -228,13 +225,14 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
     if (simReg === 0) return t.sim_none;
     return t.sim_trying;
   };
+  
   const getATText = () => (simAt === 1 ? t.sim_ok : t.sim_nok);
 
   return (
     <Card className="p-6">
       <h2 className="text-lg font-semibold mb-4 text-foreground">{t.title}</h2>
 
-      {/* —— 1. Trạng thái SIM —— */}
+      {/* 1. SIM Status */}
       <div className="mb-4 p-4 rounded-lg border bg-muted/50 space-y-3">
         <div className="flex items-center gap-3 mb-1">
           <Shield className="w-6 h-6 text-primary" />
@@ -242,7 +240,7 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
         </div>
         <div className="flex flex-wrap gap-5 text-sm">
           <div>
-            {t.at}: <span className={simAt === 1 ? "text-green-600" : "text-red-500"}>{getATText()}</span>
+            {t.at}:  <span className={simAt === 1 ? "text-green-600" : "text-red-500"}>{getATText()}</span>
           </div>
           <div>
             {t.reg}: <span className="text-blue-600">{getRegText()}</span>
@@ -260,7 +258,8 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
             </span>
           </div>
         </div>
-        {/* Button CALL & SMS */}
+        
+        {/* CALL & SMS */}
         <div className="flex flex-col gap-2 mt-2">
           <div className="flex items-center justify-between w-60 max-w-full">
             <div className="flex gap-1 items-center">
@@ -279,13 +278,13 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
             </div>
             <Switch checked={smsEnable} onCheckedChange={handleSms} />
             <span className={`ml-3 text-sm font-medium ${smsEnable ? "text-green-600" : "text-gray-500"}`}>
-              {smsEnable ? t.on : t.off}
+              {smsEnable ? t.on :  t.off}
             </span>
           </div>
         </div>
       </div>
 
-      {/* —— 2. MODE AUTO / MANUAL —— */}
+      {/* 2. Auto/Manual Mode */}
       <div className="flex gap-4 mb-4">
         <Button
           variant={autoMode ? "default" : "outline"}
@@ -299,11 +298,11 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
           size="sm"
           onClick={() => handleModeChange(false)}
         >
-          {t.manual}
+          {t. manual}
         </Button>
       </div>
 
-      {/* —— 3. Chống trộm —— */}
+      {/* 3. Motion */}
       <div className="mb-3 p-4 rounded-lg border bg-muted/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-primary" />
@@ -315,14 +314,15 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
           </div>
         </div>
         <div className="flex items-center">
-          <Switch checked={motionEnable} onCheckedChange={handleMotion} />
-          <span className={`ml-2 text-sm font-medium ${motionEnable ? "text-green-600" : "text-gray-500"}`}>
+          <Switch checked={motionEnable} onCheckedChange={handleMotionControl} />
+          {/* ↑ SỬA ĐÂY */}
+          <span className={`ml-2 text-sm font-medium ${motionEnable ?  "text-green-600" :  "text-gray-500"}`}>
             {motionEnable ? t.on : t.off}
           </span>
         </div>
       </div>
 
-      {/* —— 4. Cửa trước —— */}
+      {/* 4. Door */}
       <div className="mb-3 p-4 rounded-lg border bg-muted/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Lock className="w-6 h-6 text-accent" />
@@ -341,13 +341,13 @@ export function SecurityPanel({ language }: SecurityPanelProps) {
         </div>
       </div>
 
-      {/* —— 5. Báo cháy + MQ2 —— */}
+      {/* 5. Fire */}
       <div className="mb-1 p-4 rounded-lg border bg-muted/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Flame className="w-6 h-6 text-red-500" />
           <div>
             <div className="font-medium">{t.fireName}</div>
-            <div className={fireAlert ? "text-red-500 text-xs" : "text-muted-foreground text-xs"}>
+            <div className={fireAlert ? "text-red-500 text-xs" :  "text-muted-foreground text-xs"}>
               {fireAlert ? t.gasAlarm : t.gasClear}
             </div>
           </div>

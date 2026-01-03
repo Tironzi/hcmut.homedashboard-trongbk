@@ -2,35 +2,40 @@
 
 import { useState, useEffect, useRef } from "react";
 import { socket } from "@/lib/socket";
-import { Flame, AlertTriangle } from "lucide-react";
+import { Flame, AlertTriangle, X, Lock } from "lucide-react";
 
 const t = {
   vi: {
-    firePopupTitle: "Cảnh báo",
-    firePopupMsg: "Phát hiện khói/khí gas!",
-    firePopupClose: "Tắt cảnh báo",
-    motionPopupTitle: "Cảnh báo chuyển động",
-    motionPopupMsg: "Có người đột nhập!",
-    motionPopupClose: "Tắt cảnh báo chuyển động",
+    fireMsg: "🔥 Phát hiện khói/khí gas!",
+    motionMsg: "⚠️ Có người đột nhập!",
+    doorMsg: "🚪 Cảnh báo: Mở cửa sai quá 5 lần!",
   },
   en: {
-    firePopupTitle: "Warning",
-    firePopupMsg: "Smoke/Gas detected!",
-    firePopupClose: "Dismiss Alarm",
-    motionPopupTitle: "Motion Alert",
-    motionPopupMsg: "Intrusion detected!",
-    motionPopupClose: "Dismiss Motion Alarm",
+    fireMsg: "🔥 Smoke/Gas detected!",
+    motionMsg: "⚠️ Intrusion detected!",
+    doorMsg: "🚪 Warning: Door unlock failed 5 times!",
   }
 };
 
 export default function AlarmListener({ language = "vi" }: { language?: "vi" | "en" }) {
   const [showFirePopup, setShowFirePopup] = useState(false);
   const [showMotionPopup, setShowMotionPopup] = useState(false);
+  const [showDoorPopup, setShowDoorPopup] = useState(false);
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const content = t[language];
 
+  // Hàm dừng âm thanh an toàn
+  const stopAlarmAudio = () => {
+    try {
+      alarmAudioRef.current?.pause();
+      if (alarmAudioRef.current) alarmAudioRef.current.currentTime = 0;
+    } catch (e) {
+      console.error("Audio stop error:", e);
+    }
+  };
+
   useEffect(() => {
-    // Unlock audio
+    // Unlock audio browser policy
     const unlockAudio = () => {
       alarmAudioRef.current?.play().then(() => {
         alarmAudioRef.current?.pause();
@@ -48,22 +53,64 @@ export default function AlarmListener({ language = "vi" }: { language?: "vi" | "
   }, []);
 
   useEffect(() => {
+    // --- 1. XỬ LÝ BÁO CHÁY ---
     const handleFireEvent = (data: { status: "ALARM" | "CLEAR" }) => {
+      console.log("🔥 [AlarmListener] Fire event:", data);
+      
       if (data.status === "ALARM") {
-        setShowFirePopup(true);
-        alarmAudioRef.current?.play().catch(()=>{});
+        const isDismissed = sessionStorage.getItem("fire_dismissed");
+        if (!isDismissed) {
+          setShowFirePopup(true);
+          alarmAudioRef.current?.play().catch(() => {});
+        }
+      } else {
+        // 👇 SỬA Ở ĐÂY: Thêm stopAlarmAudio() khi hết báo động
+        sessionStorage.removeItem("fire_dismissed");
+        setShowFirePopup(false);
+        stopAlarmAudio(); 
       }
     };
 
+    // --- 2. XỬ LÝ CHUYỂN ĐỘNG ---
     const handleMotionEvent = (data: { status: "DETECTED" | "CLEAR" }) => {
+      console.log("⚠️ [AlarmListener] Motion event:", data);
+      
       if (data.status === "DETECTED") {
-        setShowMotionPopup(true);
-        alarmAudioRef.current?.play().catch(()=>{});
+        const isDismissed = sessionStorage.getItem("motion_dismissed");
+        if (!isDismissed) {
+          setShowMotionPopup(true);
+          alarmAudioRef.current?.play().catch(() => {});
+        }
+      } else {
+        // 👇 SỬA Ở ĐÂY
+        sessionStorage.removeItem("motion_dismissed");
+        setShowMotionPopup(false);
+        stopAlarmAudio();
+      }
+    };
+
+    // --- 3. XỬ LÝ CỬA ---
+    const handleDoorEvent = (data: { status: "ALARM" | "CLEAR" }) => {
+      console.log("🚪 [AlarmListener] door_breach event received:", data);
+      
+      if (data.status === "ALARM") {
+        const isDismissed = sessionStorage.getItem("door_dismissed");
+        if (!isDismissed) {
+          console.log("✅ [AlarmListener] SHOWING DOOR POPUP!");
+          setShowDoorPopup(true);
+          alarmAudioRef.current?.play().catch(() => {});
+        }
+      } else {
+        // 👇 SỬA Ở ĐÂY
+        sessionStorage.removeItem("door_dismissed");
+        setShowDoorPopup(false);
+        stopAlarmAudio();
       }
     };
 
     socket.on("mq2", handleFireEvent);
     socket.on("motion", handleMotionEvent);
+    socket.on("door_breach", handleDoorEvent);
 
     if (socket.connected) socket.emit("request_sync_state");
     socket.on("connect", () => socket.emit("request_sync_state"));
@@ -71,63 +118,84 @@ export default function AlarmListener({ language = "vi" }: { language?: "vi" | "
     return () => {
       socket.off("mq2", handleFireEvent);
       socket.off("motion", handleMotionEvent);
+      socket.off("door_breach", handleDoorEvent);
       socket.off("connect");
     };
   }, []);
 
-  const stopAlarmAudio = () => {
-    alarmAudioRef.current?.pause();
-    if (alarmAudioRef.current) alarmAudioRef.current.currentTime = 0;
-  };
+  // --- CÁC HÀM TẮT POPUP THỦ CÔNG ---
 
   const handleFireDismiss = () => {
     setShowFirePopup(false);
     stopAlarmAudio();
+    sessionStorage.setItem("fire_dismissed", "true"); 
   };
+
   const handleMotionDismiss = () => {
     setShowMotionPopup(false);
     stopAlarmAudio();
+    sessionStorage.setItem("motion_dismissed", "true"); 
+  };
+
+  const handleDoorDismiss = () => {
+    setShowDoorPopup(false);
+    stopAlarmAudio();
+    sessionStorage.setItem("door_dismissed", "true"); 
   };
 
   return (
     <>
-      <audio src="/sounds/alarm.mp3" ref={alarmAudioRef} loop preload="auto" />
+      <audio src="/sounds/mixkit.wav" ref={alarmAudioRef} loop preload="auto" />
 
+      {/* 🔥 FIRE ALARM */}
       {showFirePopup && (
-        <div className="fixed z-[9999] inset-0 flex items-center justify-center bg-black bg-opacity-70">
-          <div className="bg-white border-4 border-red-600 rounded-xl px-10 py-10 shadow-2xl flex flex-col items-center animate-bounce-slow max-w-sm mx-4">
-            <Flame className="w-20 h-20 text-red-600 animate-pulse mb-6" />
-            <div className="text-3xl font-extrabold text-red-700 mb-2 uppercase tracking-wider text-center">
-                {content.firePopupTitle}
-            </div>
-            <div className="mb-8 text-xl font-semibold text-gray-800 text-center">
-                {content.firePopupMsg}
+        <div className="fixed top-0 left-0 right-0 z-[9999] flex justify-center px-4 pt-4 animate-slide-down">
+          <div className="bg-red-600 text-white rounded-lg shadow-2xl px-6 py-4 flex items-center gap-4 max-w-md w-full border-2 border-red-700">
+            <Flame className="w-8 h-8 flex-shrink-0 animate-pulse" />
+            <div className="flex-1 font-semibold text-lg">
+              {content.fireMsg}
             </div>
             <button
-              className="px-8 py-3 bg-red-600 text-white font-bold text-lg rounded-full hover:bg-red-700 active:scale-95 transition-all shadow-lg ring-4 ring-red-200"
               onClick={handleFireDismiss}
+              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-red-700 hover:bg-red-800 transition-all active:scale-95"
             >
-              {content.firePopupClose}
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
       )}
 
+      {/* ⚠️ MOTION ALARM */}
       {showMotionPopup && (
-        <div className="fixed z-[9998] inset-0 flex items-center justify-center bg-black bg-opacity-60">
-          <div className="bg-white border-4 border-amber-500 rounded-xl px-10 py-10 shadow-2xl flex flex-col items-center animate-bounce-slow max-w-sm mx-4">
-            <AlertTriangle className="w-20 h-20 text-amber-500 animate-pulse mb-6" />
-            <div className="text-3xl font-extrabold text-amber-700 mb-2 uppercase tracking-wider text-center">
-                {content.motionPopupTitle}
-            </div>
-            <div className="mb-8 text-xl font-semibold text-gray-800 text-center">
-                {content.motionPopupMsg}
+        <div className="fixed top-20 left-0 right-0 z-[9998] flex justify-center px-4 animate-slide-down">
+          <div className="bg-amber-500 text-white rounded-lg shadow-2xl px-6 py-4 flex items-center gap-4 max-w-md w-full border-2 border-amber-600">
+            <AlertTriangle className="w-8 h-8 flex-shrink-0 animate-pulse" />
+            <div className="flex-1 font-semibold text-lg">
+              {content.motionMsg}
             </div>
             <button
-              className="px-8 py-3 bg-amber-500 text-white font-bold text-lg rounded-full hover:bg-amber-600 active:scale-95 transition-all shadow-lg ring-4 ring-amber-200"
               onClick={handleMotionDismiss}
+              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-amber-600 hover:bg-amber-700 transition-all active:scale-95"
             >
-              {content.motionPopupClose}
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 🚪 DOOR ALARM */}
+      {showDoorPopup && (
+        <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4 animate-slide-down">
+          <div className="bg-yellow-400 text-red-600 rounded-lg shadow-2xl px-6 py-4 flex items-center gap-4 max-w-md w-full border-2 border-yellow-500">
+            <Lock className="w-8 h-8 flex-shrink-0 animate-pulse text-red-600" />
+            <div className="flex-1 font-bold text-lg text-red-600">
+              {content.doorMsg}
+            </div>
+            <button
+              onClick={handleDoorDismiss}
+              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-yellow-500 hover:bg-yellow-600 transition-all active:scale-95"
+            >
+              <X className="w-5 h-5 text-red-600" />
             </button>
           </div>
         </div>

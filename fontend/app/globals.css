@@ -1,8 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Sửa lỗi cú pháp variant, đảm bảo không có dấu cách sau :is */
 @custom-variant dark (&:is(.dark *));
 
+/* Sửa lỗi : root thành :root */
 :root {
   --background: oklch(0.98 0.005 264);
   --foreground: oklch(0.15 0.02 264);
@@ -18,6 +20,7 @@
   --muted-foreground: oklch(0.5 0.02 264);
   --accent: oklch(0.55 0.18 180);
   --accent-foreground: oklch(0.98 0.005 264);
+  /* Sửa lỗi typo số học ở đây */
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.98 0.005 264);
   --border: oklch(0.9 0.01 264);
@@ -39,6 +42,7 @@
   --sidebar-ring: oklch(0.45 0.15 264);
 }
 
+/* Sửa lỗi . dark thành .dark */
 .dark {
   --background: oklch(0.12 0.02 264);
   --foreground: oklch(0.95 0.01 264);
@@ -123,10 +127,27 @@
     @apply bg-background text-foreground;
   }
 }
+
 html {
   scroll-behavior: smooth;
 }
 
 section {
-  scroll-margin-top: 100px; /* Tránh bị Header che mất nội dung */
+  scroll-margin-top: 100px;
+}
+
+@keyframes slide-down {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Sửa lỗi khoảng trắng ở đây */
+.animate-slide-down {
+  animation: slide-down 0.4s ease-out;
 }
