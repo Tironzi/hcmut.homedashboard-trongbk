@@ -35,17 +35,30 @@ export default function AlarmListener({ language = "vi" }: { language?: "vi" | "
   };
 
   useEffect(() => {
-    // Unlock audio browser policy
+    // Unlock audio browser policy (Mở khóa âm thanh trong im lặng)
     const unlockAudio = () => {
-      alarmAudioRef.current?.play().then(() => {
-        alarmAudioRef.current?.pause();
-        if (alarmAudioRef.current) alarmAudioRef.current.currentTime = 0;
-      }).catch(() => {});
+      const audio = alarmAudioRef.current;
+      if (audio) {
+        // 1. Tắt tiếng trước khi play nhử
+        audio.muted = true; 
+        
+        audio.play().then(() => {
+          // 2. Pause ngay lập tức
+          audio.pause();
+          audio.currentTime = 0;
+          
+          // 3. Bật lại tiếng để dành cho báo động thật
+          audio.muted = false; 
+        }).catch((e) => console.error("Audio unlock error:", e));
+      }
+      
       document.removeEventListener('click', unlockAudio);
       document.removeEventListener('keydown', unlockAudio);
     };
+
     document.addEventListener('click', unlockAudio);
     document.addEventListener('keydown', unlockAudio);
+
     return () => {
       document.removeEventListener('click', unlockAudio);
       document.removeEventListener('keydown', unlockAudio);

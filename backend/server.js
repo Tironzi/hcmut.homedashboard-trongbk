@@ -234,9 +234,10 @@ mqttClient.on("message", async (topic, message) => {
         const powerW = data.power || 0;
         const deltaWh = powerW * timeDiffHours; 
 
-        // --- CODE XỬ LÝ DATABASE MỚI (FIX CỨNG) ---
-        const todayStr = moment().format("YYYY-MM-DD");
-        const currentHour = new Date().getHours(); 
+       // --- CODE XỬ LÝ DATABASE MỚI (FIX CỨNG) ---
+        // 👇 SỬA: Ép về UTC+7
+        const todayStr = moment().utcOffset(7).format("YYYY-MM-DD");
+        const currentHour = moment().utcOffset(7).hour();
 
         try {
           // 1. Tìm bản ghi hôm nay
@@ -537,7 +538,7 @@ app.get("/api/notifications", async (req, res) => {
 // Hàm tính toán và gửi dữ liệu tổng hợp cho Client
 async function fetchAndEmitEnergyData() {
   try {
-    const todayStr = moment().format("YYYY-MM-DD");
+    const todayStr = moment().utcOffset(7).format("YYYY-MM-DD");
     
     // 1. Lấy dữ liệu hôm nay
     let todayRecord = await Energy.findOne({ date: todayStr });
@@ -554,7 +555,7 @@ async function fetchAndEmitEnergyData() {
     }
 
     // 2. Tính tổng tháng
-    const startOfMonth = moment().startOf('month').format("YYYY-MM-DD");
+    const startOfMonth = moment().utcOffset(7).startOf('month').format("YYYY-MM-DD");
     const monthRecords = await Energy.find({ date: { $gte: startOfMonth } });
     const monthTotalWh = monthRecords.reduce((sum, rec) => sum + (rec.totalWh || 0), 0);
 
